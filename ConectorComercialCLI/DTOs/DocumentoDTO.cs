@@ -33,6 +33,7 @@ namespace ConectorComercialCLI.DTOs
         public string Procesado { get; set; }
         public MovimientoDocumentoDTO[] movimientos { get; set; }
         public DocumentoRelacionadoDTO[] docRelacionados { get; set; } = new DocumentoRelacionadoDTO[0];
+        public DocRelacionadosNC[] docRelacionadosNCs { get; set; } = new DocRelacionadosNC[0];
 
 
     }
@@ -47,6 +48,15 @@ namespace ConectorComercialCLI.DTOs
         public string ObjetoImpDR { get; set; }
         public double ImpSaldoAnt { get; set; }
         public string ConceptoDocumento { get; set; } = string.Empty;
+    }
+
+    public class DocRelacionadosNC
+    {
+        public string UUID { get; set; }
+        public string Serie { get; set; }
+        public string Folio { get; set; }
+        public string ConceptoDocumento { get; set; } = string.Empty;
+        public string TipoRelacion {  get; set; }   
     }
 
 }

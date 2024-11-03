@@ -18,6 +18,7 @@ using System.ComponentModel;
 using ConectorComercialCLI.DTOs.Existencias;
 using static ConectorComercialCLI.DTOs.SdkDocTimbrar;
 using System.Xml.Linq;
+using System.Runtime.Remoting.Messaging;
 
 namespace ConectorComercialCLI
 {
@@ -29,6 +30,17 @@ namespace ConectorComercialCLI
      * con la ruta SOFTWARE\KronoxYKairos\ConectorComercialCLI en la llave HKEY_CURRENT_USER
      * 
     */
+    public class DocumentoDTONC
+    {
+        public int CIDDOCUMENTO { get; set; }
+        public string CSERIEDOCUMENTO { get; set; }
+        public string CFOLIO { get; set; }
+        public string CIDCONCEPTODOCUMENTO { get; set; }
+        public decimal CPENDIENTE { get; set; }
+        public string CUUID { get; set; } 
+        public decimal CABONO { get; set; }
+    }
+
     class ConectorConfig
     {
         // config SQL SERVER
@@ -140,7 +152,7 @@ namespace ConectorComercialCLI
 
             App.getConectorConfig();
             App.sdkConsumer = new ComercialSdkConsumer();
-            crearDocumentos("C:\\Desarrollo\\Mfranklin\\CLI.json");
+            //crearDocumentNC("C:\\Kronox\\MF_CLI_PREM\\CLI.json");
             //saldarDocumentos("C:\\Desarrollo\\Mfranklin\\CLI.json");
 
 
@@ -212,6 +224,17 @@ namespace ConectorComercialCLI
                            else
                            {
                                crearDocumentos(o.archivo);
+                           }
+                       }
+                       else if (o.accion == "crearNC" && o.recurso == "documentos")
+                       {
+                           if (o.archivo == "" || o.archivo == null)
+                           {
+                               sendFileRequiredMessage();
+                           }
+                           else
+                           {
+                               crearDocumentNC(o.archivo);
                            }
                        }
                        else if (o.accion == "aplicar" && o.recurso == "pagos")
@@ -846,6 +869,268 @@ namespace ConectorComercialCLI
             else
             {
                 string serializedMesssage = App.responseCLI.serializeMessage(false, "Archivo de datos no encontrado", "App", "insertando documentos");
+                Console.WriteLine(serializedMesssage);
+                App.logs.add($@"Archivo de datos no encontrado {fileData}");
+                Environment.Exit(0);
+            }
+        }
+
+        public static void crearDocumentNC(string fileData)
+        {
+            FileManager fm = new FileManager();
+            App.logs.add($@"leyendo archivo -Documento Pago {fileData}");
+            if (fm.checkIfExists(fileData))
+            {
+                string data = "";
+                string serializedMesssage;
+                InputDocumentosDTO input = new InputDocumentosDTO();
+                try
+                {
+                    data = fm.getContentFile(fileData, includePath: true);
+                    input = JsonConvert.DeserializeObject<InputDocumentosDTO>(data);
+
+                    App.config = new ConectorConfig()
+                    {
+                        dbInstance = input.instancia,
+                        dbDatabase = input.empresaDB,
+                        dbUser = input.userSQL,
+                        dbPass = input.passSQL,
+                        sdkUser = input.userSDK,
+                        sdkPass = input.passSDK,
+                        sdkEmpresaEnUso = input.rutaEmpresa
+                    };
+                }
+                catch (Exception e)
+                {
+                    serializedMesssage = App.responseCLI.serializeMessage(false, "Error al convertir los datos json", "App", "Aplicando pagos");
+                    App.logs.add($@"error al convertir los datos de pagos {e.StackTrace}");
+                    Console.WriteLine(serializedMesssage);
+                    Environment.Exit(0);
+                }
+
+                if (data != "")
+                {
+                    try
+                    {
+                        ComercialSdkConsumer sdk = new ComercialSdkConsumer(new ComercialSdkConsumerConfigDTO()
+                        {
+                            userSDK = input.userSDK,
+                            passSDK = input.passSDK
+                        });
+                        sdk.inicializaSdk();
+                        sdk.abreEmpresa(input.rutaEmpresa);
+                        SQLSRV db = new SQLSRV(new DTOs.ConfiguracionSqlServerDTO()
+                        {
+                            instancia = input.instancia,
+                            db = input.empresaDB,
+                            usuario = input.userSQL,
+                            contrasena = input.passSQL
+                        });
+                        db.Conecta();
+                        // se acumulan los documentos que se estan procesando para retornar una respuesta
+                        List<DocumentoDTO> documentosRespuesta = new List<DocumentoDTO>();
+                        foreach (var documento in input.documentos)
+                        {
+                            var serializedParent = JsonConvert.SerializeObject(documento);
+                            DocumentoRespuestaDTO docTemp = JsonConvert.DeserializeObject<DocumentoRespuestaDTO>(serializedParent);
+                            //Aqui se valida si todos los UUID existen
+                            var totalUUIDs = documento.docRelacionadosNCs.Length;
+                            List<string> uuids = new List<string>();
+
+                            //Aqui agrego en una lista a todos los UUID que existe en mi XML
+                            foreach (DocRelacionadosNC docRelacionado in documento.docRelacionadosNCs)
+                            {
+                                uuids.Add($"'{docRelacionado.UUID}'");
+                            }
+
+                            try
+                            {
+                                string uuidsConcatenados = string.Join(",", uuids);
+                                var totalDocumentos = db.EjecutarLecturaDeDatos($@" SELECT D.CIDDOCUMENTO, D.CSERIEDOCUMENTO, D.CFOLIO, D.CIDCONCEPTODOCUMENTO, CAST(D.CPENDIENTE AS DECIMAL(18, 2)) AS CPENDIENTE, F.CUUID 
+                                FROM admFoliosDigitales F LEFT JOIN admDocumentos D ON F.CIDDOCTO = D.CIDDOCUMENTO 
+                                WHERE F.CIDDOCTO <> 0 AND F.CRFC = '{documento.codigoCteProv}' AND D.CPENDIENTE > 0  AND F.CUUID IN ({uuidsConcatenados}) 
+                                ORDER BY F.CFECHAEMI ASC");
+                                int rowCount = 0; 
+                                decimal totalPendiente = 0;
+                                var documentosNCs = new List<DocumentoDTONC>();
+                                //Crea mi objetos para acceder y proceder a saldar mis documentos
+
+                                var totalDocumentoImporte = documento.importe;
+                                decimal abonoMinimo = 1; // Abono mínimo de 1 peso
+                                decimal montoRestante = decimal.Parse(totalDocumentoImporte);
+
+                                while (totalDocumentos.Read())
+                                {
+                                    rowCount++;
+                                    if (!totalDocumentos.IsDBNull(4)) // 4 es el índice de CPENDIENTE
+                                    {
+                                        decimal cpPendiente = totalDocumentos.GetDecimal(4); // Obtener el valor
+                                        totalPendiente += cpPendiente; // Sumar CPENDIENTE
+                                    }
+                                   
+                                    var documentonc = new DocumentoDTONC
+                                    {
+                                        CIDDOCUMENTO = totalDocumentos["CIDDOCUMENTO"] is DBNull ? 0 : Convert.ToInt32(totalDocumentos["CIDDOCUMENTO"]),
+                                        CSERIEDOCUMENTO = totalDocumentos["CSERIEDOCUMENTO"] is DBNull ? string.Empty : totalDocumentos["CSERIEDOCUMENTO"].ToString(),
+                                        CFOLIO = totalDocumentos["CFOLIO"] is DBNull ? string.Empty : totalDocumentos["CFOLIO"].ToString(),
+                                        CIDCONCEPTODOCUMENTO = totalDocumentos["CIDCONCEPTODOCUMENTO"] is DBNull ? string.Empty : Convert.ToString(totalDocumentos["CIDCONCEPTODOCUMENTO"]),
+                                        CUUID = totalDocumentos["CUUID"] is DBNull ? string.Empty : totalDocumentos["CUUID"].ToString(),
+                                        CPENDIENTE = totalDocumentos["CPENDIENTE"] is DBNull ? 0m : Convert.ToDecimal(totalDocumentos["CPENDIENTE"]) // Asegúrate de que CPENDIENTE sea decimal+
+                                        
+                                    };
+                                    documentosNCs.Add(documentonc);
+                                }
+
+                                // Asigna el abono mínimo de 1 peso a cada documento primero
+                                foreach (var doc in documentosNCs)
+                                {
+                                    if (montoRestante < abonoMinimo)
+                                    {
+                                        throw new Exception("Monto insuficiente para abonar a todos los documentos con el abono mínimo.");
+                                    }
+
+                                    // Abona el mínimo a cada documento
+                                    doc.CABONO = abonoMinimo;
+                                    montoRestante -= abonoMinimo;
+                                }
+
+                                // Distribuye el monto restante en orden (ya viene ordenado desde la consulta)
+                                foreach (var doc in documentosNCs)
+                                {
+                                    if (montoRestante <= 0)
+                                    {
+                                        break; // Detén la distribución si no queda monto
+                                    }
+
+                                    // Calcula el monto a abonar sin exceder el saldo pendiente del documento
+                                    decimal montoASaldar = Math.Min(montoRestante, doc.CPENDIENTE - doc.CABONO);
+                                    doc.CABONO += montoASaldar;
+                                    montoRestante -= montoASaldar;
+                                }
+
+                                // Mostrar el abono asignado a cada documento
+                                foreach (var doc in documentosNCs)
+                                {
+                                    App.logs.add("********* DATOS A REALIZAR ********");
+                                    App.logs.add($"Documento ID: {doc.CIDDOCUMENTO}, Serie: {doc.CSERIEDOCUMENTO}, Folio: {doc.CFOLIO}, " +
+                                                      $"Abono: {doc.CABONO}, Saldo Pendiente Final: {doc.CPENDIENTE - doc.CABONO}");
+                                    App.logs.add("********* DATOS A REALIZAR ********");
+                                }
+
+                                if (rowCount == totalUUIDs)
+                                {
+                                    App.logs.add($@"------------Se inicia a crear la Notas de Credito / Nota de cargo");
+                                    DocumentoRespuestaDTO docRespuesta = sdk.creaDocumento(docTemp);
+                                    docRespuesta.FileName = docTemp.FileName;
+                                    docRespuesta.docRelacionados = documento.docRelacionados;
+
+                                    if (docRespuesta.error == null)
+                                    {
+                                        // se consulta el folio insertado y se valida si es que se inserto
+                                        if (docRespuesta.id != null || int.TryParse(docRespuesta.id, out int docId) && docId > 0)
+                                        {
+                                            docRespuesta.folio = db.ExecuteScalar($"SELECT CFOLIO FROM admDocumentos WHERE CIDDOCUMENTO = {docRespuesta.id}");
+                                        }
+                                        documentosRespuesta.Add(docRespuesta);
+                                    }
+                                    if (docRespuesta.id != null || int.TryParse(docRespuesta.id, out int docIde) && docIde > 0)
+                                    {
+                                        int affectedRows = db.EjecutaSimpleQuery($"" +
+                                            $"UPDATE admDocumentos SET COBSERVACIONES = '{documento.observaciones}', " +
+                                            $"CCANTPARCI = '{documento.MetodoPago}',  CLUGAREXPE = '{documento.LugarExp}' , CMETODOPAG= '{documento.FormaPago}'," +
+                                            $"CCONDIPAGO = '{documento.CondicionPago}' WHERE CIDDOCUMENTO = {docRespuesta.id}");
+
+                                        int affectedRowsFolios = db.EjecutaSimpleQuery($"UPDATE admFoliosDigitales SET CCODCONCBA = '{documento.UsoCFDI}' , CDESCAUT03 ='{documento.RegimenFiscal}'  WHERE CIDDOCTO = {docRespuesta.id}");
+                                        if (affectedRows <= 0)
+                                        {
+                                            App.logs.add($@"Error: No se pudo actualizar las observaciones del documento {docRespuesta.folio}");
+                                        }
+
+                                        foreach (MovimientoDocumentoDTO movimiento in docRespuesta.movimientos)
+                                        {
+                                            int affectedMovimientos = db.EjecutaSimpleQuery($"UPDATE ADMMOVIMIENTOS SET CTEXTOEXTRA1 = '{movimiento.ctextoExtra1}' WHERE CIDMOVIMIENTO = {movimiento.id}");
+                                            if (affectedMovimientos <= 0)
+                                            {
+                                                App.logs.add($@"Error: No se pudo actualizar el campo CTEXTOEXTRA1 del Movimiento {docRespuesta.folio}");
+                                            }
+                                        }
+                                        int totalRelaciones = documento.docRelacionadosNCs.Length;
+
+                                        foreach (var docNC in documentosNCs)
+                                        {
+                                            int docRelacionadoNC = sdk.relacionarDocumento(documento.codConcepto, documento.serie, documento.folio, docNC.CUUID, "01");
+                                            if (docRelacionadoNC > 0)
+                                            {
+                                                tLlaveDoc llaveDocumento = new tLlaveDoc();
+                                                llaveDocumento.aSerie = docNC.CSERIEDOCUMENTO;
+                                                llaveDocumento.aFolio = Convert.ToDouble(docNC.CFOLIO);
+                                                llaveDocumento.aCodConcepto = docNC.CIDCONCEPTODOCUMENTO;
+
+                                                tLlaveDoc llavePago = new tLlaveDoc();
+                                                llavePago.aSerie = docRespuesta.serie;
+                                                llavePago.aFolio = Convert.ToDouble(docRespuesta.folio);
+                                                llavePago.aCodConcepto = documento.codConcepto;
+
+                                                int saldadoDocumento = sdk.saldarDocumentoPago(llaveDocumento, llavePago, Convert.ToDouble(docNC.CABONO), int.Parse(documento.numMoneda), documento.fecha);
+                                            }
+                                            else
+                                            {
+                                                App.logs.add($@"Error: No se pudo relacionar la factura con folio: {docNC.CSERIEDOCUMENTO} - {docNC.CFOLIO} No se encuentra en sistema");
+                                            }
+                                        }
+                                        //Aqui timbramos el documento pago
+                                        if (documento.TimbrarCFDI)
+                                        {
+                                            Comprobante comprobante = new Comprobante();
+                                            comprobante.aSerie = documento.serie;
+                                            comprobante.aCodConcepto = documento.codConcepto;
+                                            comprobante.aFolio = documento.folio;
+                                            comprobante.aPassword = input.PassCSD;
+                                            sdk.timbrarDocumento(comprobante);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        App.logs.add($@"xxxxx ocurrio un error al crear documento xxxxxxx");
+                                    }
+                                }
+                                else
+                                {
+                                    App.logs.add("El número de documentos no coincide con la cantidad de UUIDs.");
+                                }
+
+                            }
+                            catch (Exception ex)
+                            {
+                                App.logs.add($"Se ha producido un error: {ex.Message}");
+                            }
+
+                        }
+                        
+                        db.Desconecta();
+                        sdk.finalizaSdk();
+                        serializedMesssage = App.responseCLI.serializeMessage(true, "NC procesados", documentosRespuesta);
+                        App.logs.add($@"Notas procesadas correctamente");
+                        Console.WriteLine(serializedMesssage);
+                        Environment.Exit(0);
+                    }
+                    catch (Exception e)
+                    {
+                        App.logs.add($"Error al leer los documentos");
+                        App.logs.add(e.StackTrace);
+                    }
+                }
+                else
+                {
+                    serializedMesssage = App.responseCLI.serializeMessage(false, "Datos de pagos no válidos", "App", "aplicando pagos");
+                    App.logs.add($@"datos de notas no validos");
+                    Console.WriteLine(serializedMesssage);
+                    Environment.Exit(0);
+                }
+            }
+            else
+            {
+                string serializedMesssage = App.responseCLI.serializeMessage(false, "Archivo de datos no encontrado", "App", "aplicando pagos");
                 Console.WriteLine(serializedMesssage);
                 App.logs.add($@"Archivo de datos no encontrado {fileData}");
                 Environment.Exit(0);

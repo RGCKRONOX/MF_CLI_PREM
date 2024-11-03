@@ -1,0 +1,67 @@
+{
+  "UserSDK": "Supervisor",
+  "PassSDK": "",
+  "Instancia": "DEVHUSK\\SQL22",
+  "UserSQL": "sa",
+  "PassSQL": "root",
+  "EmpresaDB": "adMotores_Franklin",
+  "RutaEmpresa": "C:\\Compac\\Empresas\\adMotores_Franklin",
+  "PassCSD": "12345678a",
+  "Documentos": [
+    {
+      "Id": 0,
+      "Folio": "1012",
+      "Serie": "CM",
+      "NumMoneda": "2",
+      "TipoCambio": "19.212700",
+      "Referencia": "",
+      "DescuentoDoc1": "0",
+      "Importe": "1172.02",
+      "CodConcepto": "8",
+      "Fecha": "2024-10-11T00:10:53",
+      "CodigoCteProv": "MECM890831375",
+      "Observaciones": "",
+      "TimbrarCFDI": "True",
+      "LugarExp": "64560",
+      "FormaPago": "99",
+      "CondicionPago": "2% 30, 60 Days PF",
+      "UsoCFDI": "G02",
+      "MetodoPago": "2",
+      "FileName": "C:\\Kronox\\MF_ReadXMLs\\XML\\NotaCredito\\NC_34861_06400_241008_ 01053.xml",
+      "RegimenFiscal": "601",
+      "Procesado": "",
+      "Movimientos": [
+        {
+          "Id": 0,
+          "Consecutivo": "",
+          "Unidades": "1.00",
+          "Precio": "148.2900",
+          "Costo": "148.29",
+          "CodProdSer": "2PP",
+          "CodAlmacen": "1",
+          "Referencia": "",
+          "CtextoExtra1": ""
+        }
+      ],
+      "docRelacionados": [],
+      "docRelacionadosNCs": [
+        {
+          "UUID": "FE7AA8E0-3F69-48F1-807F-5E77F83CF5F7",
+          "TipoRelacion": "01"
+        },
+        {
+          "UUID": "62D1CDFE-38FC-4E7F-8470-B9F8AD79B7D1",
+          "TipoRelacion": "01"
+        },
+        {
+          "UUID": "D6FEAC1A-83F1-4223-9FAC-C16BB4AF97D3",
+          "TipoRelacion": "01"
+        },
+        {
+          "UUID": "524AE1CD-5867-42AA-98CD-45BDDEB1A71A",
+          "TipoRelacion": "01"
+        }
+      ]
+    }
+  ]
+}

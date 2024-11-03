@@ -550,6 +550,30 @@ namespace ConectorComercialCLI
             }
         }
 
+        public int relacionarDocumento(string concepto, string serie, string aFolio, string uuid, string TipoRelacion)
+        {
+            int Bandera = 0; //0 significa Fallo, 1 Se saldo
+            try
+            {
+                this.gError = ComercialSdk.fAgregarRelacionCFDI2(concepto,serie,aFolio, TipoRelacion, uuid);
+                if (this.gError != 0)
+                {
+                    App.logs.add($"Error al relacionar el documento ({this.ErrorComercial(this.gError)})");
+                    return Bandera;
+                }
+                else
+                {
+                    Bandera = 1;
+                    return Bandera;
+                }
+            }
+            catch (Exception e)
+            {
+                App.logs.add($"[Error] Error al saldar el documento: {e.StackTrace}");
+                return 0;
+            }
+        }
+
         public string ErrorComercial(int pNumberError)
         {
             //  Construcción de string con logitud de 512 Caracteres
